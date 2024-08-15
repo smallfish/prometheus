@@ -79,7 +79,12 @@ labels of the 1-element output vector from the input vector.
 ## `ceil()`
 
 `ceil(v instant-vector)` rounds the sample values of all elements in `v` up to
-the nearest integer.
+the nearest integer value greater than or equal to v.
+
+* `ceil(+Inf) = +Inf`
+* `ceil(±0) = ±0`
+* `ceil(1.49) = 2.0`
+* `ceil(1.78) = 2.0`
 
 ## `changes()`
 
@@ -93,8 +98,9 @@ vector.
 clamps the sample values of all elements in `v` to have a lower limit of `min` and an upper limit of `max`.
 
 Special cases:
-- Return an empty vector if `min > max`
-- Return `NaN` if `min` or `max` is `NaN`
+
+* Return an empty vector if `min > max`
+* Return `NaN` if `min` or `max` is `NaN`
 
 ## `clamp_max()`
 
@@ -173,7 +179,33 @@ Special cases are:
 ## `floor()`
 
 `floor(v instant-vector)` rounds the sample values of all elements in `v` down
-to the nearest integer.
+to the nearest integer value smaller than or equal to v.
+
+* `floor(+Inf) = +Inf`
+* `floor(±0) = ±0`
+* `floor(1.49) = 1.0`
+* `floor(1.78) = 1.0`
+
+## `histogram_avg()`
+
+_This function only acts on native histograms, which are an experimental
+feature. The behavior of this function may change in future versions of
+Prometheus, including its removal from PromQL._
+
+`histogram_avg(v instant-vector)` returns the arithmetic average of observed values stored in
+a native histogram. Samples that are not native histograms are ignored and do
+not show up in the returned vector.
+
+Use `histogram_avg` as demonstrated below to compute the average request duration
+over a 5-minute window from a native histogram:
+
+    histogram_avg(rate(http_request_duration_seconds[5m]))
+
+Which is equivalent to the following query:
+
+      histogram_sum(rate(http_request_duration_seconds[5m]))
+    /
+      histogram_count(rate(http_request_duration_seconds[5m]))
 
 ## `histogram_count()` and `histogram_sum()`
 
@@ -192,13 +224,6 @@ Use `histogram_count` in the following way to calculate a rate of observations
 (in this case corresponding to “requests per second”) from a native histogram:
 
     histogram_count(rate(http_request_duration_seconds[10m]))
-
-The additional use of `histogram_sum` enables the calculation of the average of
-observed values (in this case corresponding to “average request duration”):
-
-      histogram_sum(rate(http_request_duration_seconds[10m]))
-	/
-      histogram_count(rate(http_request_duration_seconds[10m]))
 
 ## `histogram_fraction()`
 
@@ -325,8 +350,8 @@ a histogram.
 
 Buckets of classic histograms are cumulative. Therefore, the following should always be the case:
 
-- The counts in the buckets are monotonically increasing (strictly non-decreasing).
-- A lack of observations between the upper limits of two consecutive buckets results in equal counts
+* The counts in the buckets are monotonically increasing (strictly non-decreasing).
+* A lack of observations between the upper limits of two consecutive buckets results in equal counts
 in those two buckets.
 
 However, floating point precision issues (e.g. small discrepancies introduced by computing of buckets
@@ -582,25 +607,33 @@ have exactly one element, `scalar` will return `NaN`.
 `sort(v instant-vector)` returns vector elements sorted by their sample values,
 in ascending order. Native histograms are sorted by their sum of observations.
 
+Please note that `sort` only affects the results of instant queries, as range query results always have a fixed output ordering.
+
 ## `sort_desc()`
 
 Same as `sort`, but sorts in descending order.
 
+Like `sort`, `sort_desc` only affects the results of instant queries, as range query results always have a fixed output ordering.
+
 ## `sort_by_label()`
 
-**This function has to be enabled via the [feature flag](../feature_flags/) `--enable-feature=promql-experimental-functions`.**
+**This function has to be enabled via the [feature flag](../feature_flags.md#experimental-promql-functions) `--enable-feature=promql-experimental-functions`.**
 
 `sort_by_label(v instant-vector, label string, ...)` returns vector elements sorted by their label values and sample value in case of label values being equal, in ascending order.
 
 Please note that the sort by label functions only affect the results of instant queries, as range query results always have a fixed output ordering.
 
+This function uses [natural sort order](https://en.wikipedia.org/wiki/Natural_sort_order).
+
 ## `sort_by_label_desc()`
 
-**This function has to be enabled via the [feature flag](../feature_flags/) `--enable-feature=promql-experimental-functions`.**
+**This function has to be enabled via the [feature flag](../feature_flags.md#experimental-promql-functions) `--enable-feature=promql-experimental-functions`.**
 
 Same as `sort_by_label`, but sorts in descending order.
 
 Please note that the sort by label functions only affect the results of instant queries, as range query results always have a fixed output ordering.
+
+This function uses [natural sort order](https://en.wikipedia.org/wiki/Natural_sort_order).
 
 ## `sqrt()`
 
@@ -640,9 +673,14 @@ over time and return an instant vector with per-series aggregation results:
 * `quantile_over_time(scalar, range-vector)`: the φ-quantile (0 ≤ φ ≤ 1) of the values in the specified interval.
 * `stddev_over_time(range-vector)`: the population standard deviation of the values in the specified interval.
 * `stdvar_over_time(range-vector)`: the population standard variance of the values in the specified interval.
-* `mad_over_time(range-vector)`: the median absolute deviation of all points in the specified interval.
 * `last_over_time(range-vector)`: the most recent point value in the specified interval.
 * `present_over_time(range-vector)`: the value 1 for any series in the specified interval.
+
+If the [feature flag](../feature_flags.md#experimental-promql-functions)
+`--enable-feature=promql-experimental-functions` is set, the following
+additional functions are available:
+
+* `mad_over_time(range-vector)`: the median absolute deviation of all points in the specified interval.
 
 Note that all values in the specified interval have the same weight in the
 aggregation even if the values are not equally spaced throughout the interval.
@@ -655,21 +693,21 @@ ignore histogram samples.
 
 The trigonometric functions work in radians:
 
-- `acos(v instant-vector)`: calculates the arccosine of all elements in `v` ([special cases](https://pkg.go.dev/math#Acos)).
-- `acosh(v instant-vector)`: calculates the inverse hyperbolic cosine of all elements in `v` ([special cases](https://pkg.go.dev/math#Acosh)).
-- `asin(v instant-vector)`: calculates the arcsine of all elements in `v` ([special cases](https://pkg.go.dev/math#Asin)).
-- `asinh(v instant-vector)`: calculates the inverse hyperbolic sine of all elements in `v` ([special cases](https://pkg.go.dev/math#Asinh)).
-- `atan(v instant-vector)`: calculates the arctangent of all elements in `v` ([special cases](https://pkg.go.dev/math#Atan)).
-- `atanh(v instant-vector)`: calculates the inverse hyperbolic tangent of all elements in `v` ([special cases](https://pkg.go.dev/math#Atanh)).
-- `cos(v instant-vector)`: calculates the cosine of all elements in `v` ([special cases](https://pkg.go.dev/math#Cos)).
-- `cosh(v instant-vector)`: calculates the hyperbolic cosine of all elements in `v` ([special cases](https://pkg.go.dev/math#Cosh)).
-- `sin(v instant-vector)`: calculates the sine of all elements in `v` ([special cases](https://pkg.go.dev/math#Sin)).
-- `sinh(v instant-vector)`: calculates the hyperbolic sine of all elements in `v` ([special cases](https://pkg.go.dev/math#Sinh)).
-- `tan(v instant-vector)`: calculates the tangent of all elements in `v` ([special cases](https://pkg.go.dev/math#Tan)).
-- `tanh(v instant-vector)`: calculates the hyperbolic tangent of all elements in `v` ([special cases](https://pkg.go.dev/math#Tanh)).
+* `acos(v instant-vector)`: calculates the arccosine of all elements in `v` ([special cases](https://pkg.go.dev/math#Acos)).
+* `acosh(v instant-vector)`: calculates the inverse hyperbolic cosine of all elements in `v` ([special cases](https://pkg.go.dev/math#Acosh)).
+* `asin(v instant-vector)`: calculates the arcsine of all elements in `v` ([special cases](https://pkg.go.dev/math#Asin)).
+* `asinh(v instant-vector)`: calculates the inverse hyperbolic sine of all elements in `v` ([special cases](https://pkg.go.dev/math#Asinh)).
+* `atan(v instant-vector)`: calculates the arctangent of all elements in `v` ([special cases](https://pkg.go.dev/math#Atan)).
+* `atanh(v instant-vector)`: calculates the inverse hyperbolic tangent of all elements in `v` ([special cases](https://pkg.go.dev/math#Atanh)).
+* `cos(v instant-vector)`: calculates the cosine of all elements in `v` ([special cases](https://pkg.go.dev/math#Cos)).
+* `cosh(v instant-vector)`: calculates the hyperbolic cosine of all elements in `v` ([special cases](https://pkg.go.dev/math#Cosh)).
+* `sin(v instant-vector)`: calculates the sine of all elements in `v` ([special cases](https://pkg.go.dev/math#Sin)).
+* `sinh(v instant-vector)`: calculates the hyperbolic sine of all elements in `v` ([special cases](https://pkg.go.dev/math#Sinh)).
+* `tan(v instant-vector)`: calculates the tangent of all elements in `v` ([special cases](https://pkg.go.dev/math#Tan)).
+* `tanh(v instant-vector)`: calculates the hyperbolic tangent of all elements in `v` ([special cases](https://pkg.go.dev/math#Tanh)).
 
 The following are useful for converting between degrees and radians:
 
-- `deg(v instant-vector)`: converts radians to degrees for all elements in `v`.
-- `pi()`: returns pi.
-- `rad(v instant-vector)`: converts degrees to radians for all elements in `v`.
+* `deg(v instant-vector)`: converts radians to degrees for all elements in `v`.
+* `pi()`: returns pi.
+* `rad(v instant-vector)`: converts degrees to radians for all elements in `v`.

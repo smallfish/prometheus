@@ -52,7 +52,7 @@ type histogramRecord struct {
 	fh  *histogram.FloatHistogram
 }
 
-func (h *Head) loadWAL(r *wlog.Reader, multiRef map[chunks.HeadSeriesRef]chunks.HeadSeriesRef, mmappedChunks, oooMmappedChunks map[chunks.HeadSeriesRef][]*mmappedChunk) (err error) {
+func (h *Head) loadWAL(r *wlog.Reader, syms *labels.SymbolTable, multiRef map[chunks.HeadSeriesRef]chunks.HeadSeriesRef, mmappedChunks, oooMmappedChunks map[chunks.HeadSeriesRef][]*mmappedChunk) (err error) {
 	// Track number of samples that referenced a series we don't know about
 	// for error reporting.
 	var unknownRefs atomic.Uint64
@@ -69,7 +69,6 @@ func (h *Head) loadWAL(r *wlog.Reader, multiRef map[chunks.HeadSeriesRef]chunks.
 		processors     = make([]walSubsetProcessor, concurrency)
 		exemplarsInput chan record.RefExemplar
 
-		dec             record.Decoder
 		shards          = make([][]record.RefSample, concurrency)
 		histogramShards = make([][]histogramRecord, concurrency)
 
@@ -127,7 +126,7 @@ func (h *Head) loadWAL(r *wlog.Reader, multiRef map[chunks.HeadSeriesRef]chunks.
 			}
 			// At the moment the only possible error here is out of order exemplars, which we shouldn't see when
 			// replaying the WAL, so lets just log the error if it's not that type.
-			err = h.exemplars.AddExemplar(ms.lset, exemplar.Exemplar{Ts: e.T, Value: e.V, Labels: e.Labels})
+			err = h.exemplars.AddExemplar(ms.labels(), exemplar.Exemplar{Ts: e.T, Value: e.V, Labels: e.Labels})
 			if err != nil && errors.Is(err, storage.ErrOutOfOrderExemplar) {
 				level.Warn(h.logger).Log("msg", "Unexpected error when replaying WAL on exemplar record", "err", err)
 			}
@@ -137,6 +136,7 @@ func (h *Head) loadWAL(r *wlog.Reader, multiRef map[chunks.HeadSeriesRef]chunks.
 	go func() {
 		defer close(decoded)
 		var err error
+		dec := record.NewDecoder(syms)
 		for r.Next() {
 			rec := r.Record()
 			switch dec.Type(rec) {
@@ -435,6 +435,8 @@ Outer:
 	return nil
 }
 
+func minInt64() int64 { return math.MinInt64 }
+
 // resetSeriesWithMMappedChunks is only used during the WAL replay.
 func (h *Head) resetSeriesWithMMappedChunks(mSeries *memSeries, mmc, oooMmc []*mmappedChunk, walSeriesRef chunks.HeadSeriesRef) (overlapped bool) {
 	if mSeries.ref != walSeriesRef {
@@ -448,7 +450,7 @@ func (h *Head) resetSeriesWithMMappedChunks(mSeries *memSeries, mmc, oooMmc []*m
 			) {
 				level.Debug(h.logger).Log(
 					"msg", "M-mapped chunks overlap on a duplicate series record",
-					"series", mSeries.lset.String(),
+					"series", mSeries.labels().String(),
 					"oldref", mSeries.ref,
 					"oldmint", mSeries.mmappedChunks[0].minTime,
 					"oldmaxt", mSeries.mmappedChunks[len(mSeries.mmappedChunks)-1].maxTime,
@@ -481,10 +483,11 @@ func (h *Head) resetSeriesWithMMappedChunks(mSeries *memSeries, mmc, oooMmc []*m
 	}
 	// Cache the last mmapped chunk time, so we can skip calling append() for samples it will reject.
 	if len(mmc) == 0 {
-		mSeries.mmMaxTime = math.MinInt64
+		mSeries.shardHashOrMemoryMappedMaxTime = uint64(minInt64())
 	} else {
-		mSeries.mmMaxTime = mmc[len(mmc)-1].maxTime
-		h.updateMinMaxTime(mmc[0].minTime, mSeries.mmMaxTime)
+		mmMaxTime := mmc[len(mmc)-1].maxTime
+		mSeries.shardHashOrMemoryMappedMaxTime = uint64(mmMaxTime)
+		h.updateMinMaxTime(mmc[0].minTime, mmMaxTime)
 	}
 	if len(oooMmc) != 0 {
 		// Mint and maxt can be in any chunk, they are not sorted.
@@ -585,7 +588,7 @@ func (wp *walSubsetProcessor) processWALSamples(h *Head, mmappedChunks, oooMmapp
 				unknownRefs++
 				continue
 			}
-			if s.T <= ms.mmMaxTime {
+			if s.T <= ms.mmMaxTime() {
 				continue
 			}
 			if _, chunkCreated := ms.append(s.T, s.V, 0, appendChunkOpts); chunkCreated {
@@ -614,7 +617,7 @@ func (wp *walSubsetProcessor) processWALSamples(h *Head, mmappedChunks, oooMmapp
 				unknownHistogramRefs++
 				continue
 			}
-			if s.t <= ms.mmMaxTime {
+			if s.t <= ms.mmMaxTime() {
 				continue
 			}
 			var chunkCreated bool
@@ -645,7 +648,7 @@ func (wp *walSubsetProcessor) processWALSamples(h *Head, mmappedChunks, oooMmapp
 	return unknownRefs, unknownHistogramRefs, mmapOverlappingChunks
 }
 
-func (h *Head) loadWBL(r *wlog.Reader, multiRef map[chunks.HeadSeriesRef]chunks.HeadSeriesRef, lastMmapRef chunks.ChunkDiskMapperRef) (err error) {
+func (h *Head) loadWBL(r *wlog.Reader, syms *labels.SymbolTable, multiRef map[chunks.HeadSeriesRef]chunks.HeadSeriesRef, lastMmapRef chunks.ChunkDiskMapperRef) (err error) {
 	// Track number of samples, m-map markers, that referenced a series we don't know about
 	// for error reporting.
 	var unknownRefs, mmapMarkerUnknownRefs atomic.Uint64
@@ -657,7 +660,7 @@ func (h *Head) loadWBL(r *wlog.Reader, multiRef map[chunks.HeadSeriesRef]chunks.
 		concurrency = h.opts.WALReplayConcurrency
 		processors  = make([]wblSubsetProcessor, concurrency)
 
-		dec    record.Decoder
+		dec    = record.NewDecoder(syms)
 		shards = make([][]record.RefSample, concurrency)
 
 		decodedCh   = make(chan interface{}, 10)
@@ -887,7 +890,7 @@ func (wp *wblSubsetProcessor) processWBLSamples(h *Head) (unknownRefs uint64) {
 				unknownRefs++
 				continue
 			}
-			ok, chunkCreated, _ := ms.insert(s.T, s.V, h.chunkDiskMapper, oooCapMax)
+			ok, chunkCreated, _ := ms.insert(s.T, s.V, nil, nil, h.chunkDiskMapper, oooCapMax, h.logger)
 			if chunkCreated {
 				h.metrics.chunksCreated.Inc()
 				h.metrics.chunks.Inc()
@@ -932,7 +935,7 @@ func (s *memSeries) encodeToSnapshotRecord(b []byte) []byte {
 
 	buf.PutByte(chunkSnapshotRecordTypeSeries)
 	buf.PutBE64(uint64(s.ref))
-	record.EncodeLabels(&buf, s.lset)
+	record.EncodeLabels(&buf, s.labels())
 	buf.PutBE64int64(0) // Backwards-compatibility; was chunkRange but now unused.
 
 	s.Lock()
@@ -1323,7 +1326,6 @@ func DeleteChunkSnapshots(dir string, maxIndex, maxOffset int) error {
 				errs.Add(err)
 			}
 		}
-
 	}
 	return errs.Err()
 }
@@ -1360,7 +1362,8 @@ func (h *Head) loadChunkSnapshot() (int, int, map[chunks.HeadSeriesRef]*memSerie
 		errChan          = make(chan error, concurrency)
 		refSeries        map[chunks.HeadSeriesRef]*memSeries
 		exemplarBuf      []record.RefExemplar
-		dec              record.Decoder
+		syms             = labels.NewSymbolTable() // New table for the whole snapshot.
+		dec              = record.NewDecoder(syms)
 	)
 
 	wg.Add(concurrency)
@@ -1485,7 +1488,7 @@ Outer:
 					continue
 				}
 
-				if err := h.exemplars.AddExemplar(ms.lset, exemplar.Exemplar{
+				if err := h.exemplars.AddExemplar(ms.labels(), exemplar.Exemplar{
 					Labels: e.Labels,
 					Value:  e.V,
 					Ts:     e.T,
@@ -1496,7 +1499,7 @@ Outer:
 			}
 
 		default:
-			// This is a record type we don't understand. It is either and old format from earlier versions,
+			// This is a record type we don't understand. It is either an old format from earlier versions,
 			// or a new format and the code was rolled back to old version.
 			loopErr = fmt.Errorf("unsupported snapshot record type 0b%b", rec[0])
 			break Outer

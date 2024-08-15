@@ -28,6 +28,7 @@ import (
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/prompb"
 	"github.com/prometheus/prometheus/util/annotations"
+	"github.com/prometheus/prometheus/util/testutil"
 )
 
 func TestNoDuplicateReadConfigs(t *testing.T) {
@@ -91,7 +92,7 @@ func TestNoDuplicateReadConfigs(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run("", func(t *testing.T) {
-			s := NewStorage(nil, nil, nil, dir, defaultFlushDeadline, nil)
+			s := NewStorage(nil, nil, nil, dir, defaultFlushDeadline, nil, false)
 			conf := &config.Config{
 				GlobalConfig:      config.DefaultGlobalConfig,
 				RemoteReadConfigs: tc.cfgs,
@@ -171,12 +172,12 @@ func TestSeriesSetFilter(t *testing.T) {
 			toRemove: []string{"foo"},
 			in: &prompb.QueryResult{
 				Timeseries: []*prompb.TimeSeries{
-					{Labels: labelsToLabelsProto(labels.FromStrings("foo", "bar", "a", "b"), nil)},
+					{Labels: prompb.FromLabels(labels.FromStrings("foo", "bar", "a", "b"), nil)},
 				},
 			},
 			expected: &prompb.QueryResult{
 				Timeseries: []*prompb.TimeSeries{
-					{Labels: labelsToLabelsProto(labels.FromStrings("a", "b"), nil)},
+					{Labels: prompb.FromLabels(labels.FromStrings("a", "b"), nil)},
 				},
 			},
 		},
@@ -194,6 +195,7 @@ func TestSeriesSetFilter(t *testing.T) {
 type mockedRemoteClient struct {
 	got   *prompb.Query
 	store []*prompb.TimeSeries
+	b     labels.ScratchBuilder
 }
 
 func (c *mockedRemoteClient) Read(_ context.Context, query *prompb.Query) (*prompb.QueryResult, error) {
@@ -209,7 +211,7 @@ func (c *mockedRemoteClient) Read(_ context.Context, query *prompb.Query) (*prom
 
 	q := &prompb.QueryResult{}
 	for _, s := range c.store {
-		l := labelProtosToLabels(s.Labels)
+		l := s.ToLabels(&c.b, nil)
 		var notMatch bool
 
 		for _, m := range matchers {
@@ -241,6 +243,7 @@ func TestSampleAndChunkQueryableClient(t *testing.T) {
 			{Labels: []prompb.Label{{Name: "a", Value: "b3"}, {Name: "region", Value: "us"}}},
 			{Labels: []prompb.Label{{Name: "a", Value: "b2"}, {Name: "region", Value: "europe"}}},
 		},
+		b: labels.NewScratchBuilder(0),
 	}
 
 	for _, tc := range []struct {
@@ -484,7 +487,7 @@ func TestSampleAndChunkQueryableClient(t *testing.T) {
 				got = append(got, ss.At().Labels())
 			}
 			require.NoError(t, ss.Err())
-			require.Equal(t, tc.expectedSeries, got)
+			testutil.RequireEqual(t, tc.expectedSeries, got)
 		})
 	}
 }

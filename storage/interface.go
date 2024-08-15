@@ -37,7 +37,7 @@ var (
 	// ErrTooOldSample is when out of order support is enabled but the sample is outside the time window allowed.
 	ErrTooOldSample = errors.New("too old sample")
 	// ErrDuplicateSampleForTimestamp is when the sample has same timestamp but different value.
-	ErrDuplicateSampleForTimestamp = errors.New("duplicate sample for timestamp")
+	ErrDuplicateSampleForTimestamp = errDuplicateSampleForTimestamp{}
 	ErrOutOfOrderExemplar          = errors.New("out of order exemplar")
 	ErrDuplicateExemplar           = errors.New("duplicate exemplar")
 	ErrExemplarLabelLength         = fmt.Errorf("label length for exemplar exceeds maximum of %d UTF-8 characters", exemplar.ExemplarMaxLabelSetLength)
@@ -122,11 +122,11 @@ type MockQuerier struct {
 	SelectMockFunction func(sortSeries bool, hints *SelectHints, matchers ...*labels.Matcher) SeriesSet
 }
 
-func (q *MockQuerier) LabelValues(context.Context, string, ...*labels.Matcher) ([]string, annotations.Annotations, error) {
+func (q *MockQuerier) LabelValues(context.Context, string, *LabelHints, ...*labels.Matcher) ([]string, annotations.Annotations, error) {
 	return nil, nil, nil
 }
 
-func (q *MockQuerier) LabelNames(context.Context, ...*labels.Matcher) ([]string, annotations.Annotations, error) {
+func (q *MockQuerier) LabelNames(context.Context, *LabelHints, ...*labels.Matcher) ([]string, annotations.Annotations, error) {
 	return nil, nil, nil
 }
 
@@ -161,12 +161,12 @@ type LabelQuerier interface {
 	// It is not safe to use the strings beyond the lifetime of the querier.
 	// If matchers are specified the returned result set is reduced
 	// to label values of metrics matching the matchers.
-	LabelValues(ctx context.Context, name string, matchers ...*labels.Matcher) ([]string, annotations.Annotations, error)
+	LabelValues(ctx context.Context, name string, hints *LabelHints, matchers ...*labels.Matcher) ([]string, annotations.Annotations, error)
 
 	// LabelNames returns all the unique label names present in the block in sorted order.
 	// If matchers are specified the returned result set is reduced
 	// to label names of metrics matching the matchers.
-	LabelNames(ctx context.Context, matchers ...*labels.Matcher) ([]string, annotations.Annotations, error)
+	LabelNames(ctx context.Context, hints *LabelHints, matchers ...*labels.Matcher) ([]string, annotations.Annotations, error)
 
 	// Close releases the resources of the Querier.
 	Close() error
@@ -190,6 +190,9 @@ type SelectHints struct {
 	Start int64 // Start time in milliseconds for this select.
 	End   int64 // End time in milliseconds for this select.
 
+	// Maximum number of results returned. Use a value of 0 to disable.
+	Limit int
+
 	Step int64  // Query step size in milliseconds.
 	Func string // String representation of surrounding function or aggregation.
 
@@ -197,10 +200,31 @@ type SelectHints struct {
 	By       bool     // Indicate whether it is without or by.
 	Range    int64    // Range vector selector range in milliseconds.
 
+	// ShardCount is the total number of shards that series should be split into
+	// at query time. Then, only series in the ShardIndex shard will be returned
+	// by the query.
+	//
+	// ShardCount equal to 0 means that sharding is disabled.
+	ShardCount uint64
+
+	// ShardIndex is the series shard index to query. The index must be between 0 and ShardCount-1.
+	// When ShardCount is set to a value > 0, then a query will only process series within the
+	// ShardIndex's shard.
+	//
+	// Series are sharded by "labels stable hash" mod "ShardCount".
+	ShardIndex uint64
+
 	// DisableTrimming allows to disable trimming of matching series chunks based on query Start and End time.
 	// When disabled, the result may contain samples outside the queried time range but Select() performances
 	// may be improved.
 	DisableTrimming bool
+}
+
+// LabelHints specifies hints passed for label reads.
+// This is used only as an option for implementation to use.
+type LabelHints struct {
+	// Maximum number of results returned. Use a value of 0 to disable.
+	Limit int
 }
 
 // TODO(bwplotka): Move to promql/engine_test.go?

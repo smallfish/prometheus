@@ -216,6 +216,12 @@ export const functionIdentifierTerms = [
     type: 'function',
   },
   {
+    label: 'histogram_avg',
+    detail: 'function',
+    info: 'Return the average of observations from a native histogram (experimental feature)',
+    type: 'function',
+  },
+  {
     label: 'histogram_count',
     detail: 'function',
     info: 'Return the count of observations from a native histogram (experimental feature)',
@@ -536,6 +542,18 @@ export const aggregateOpTerms = [
     label: 'group',
     detail: 'aggregation',
     info: 'Group series, while setting the sample value to 1',
+    type: 'keyword',
+  },
+  {
+    label: 'limitk',
+    detail: 'aggregation',
+    info: 'Sample k elements',
+    type: 'keyword',
+  },
+  {
+    label: 'limit_ratio',
+    detail: 'aggregation',
+    info: 'Sample given ratio of elements',
     type: 'keyword',
   },
   {
