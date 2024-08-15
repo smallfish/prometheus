@@ -779,51 +779,6 @@ func formatSeriesSet(ss storage.SeriesSet) error {
 	return nil
 }
 
-func dumpSeries(ctx context.Context, dbDir, sandboxDirRoot string, mint, maxt int64, match []string, formatter SeriesSetFormatter) (err error) {
-	db, err := tsdb.OpenDBReadOnly(dbDir, sandboxDirRoot, nil)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		err = tsdb_errors.NewMulti(err, db.Close()).Err()
-	}()
-	q, err := db.Querier(mint, maxt)
-	if err != nil {
-		return err
-	}
-	defer q.Close()
-
-	matcherSets, err := parser.ParseMetricSelectors(match)
-	if err != nil {
-		return err
-	}
-
-	var ss storage.SeriesSet
-	if len(matcherSets) > 1 {
-		var sets []storage.SeriesSet
-		for _, mset := range matcherSets {
-			sets = append(sets, q.Select(ctx, true, nil, mset...))
-		}
-		ss = storage.NewMergeSeriesSet(sets, storage.ChainedSeriesMerge)
-	} else {
-		ss = q.Select(ctx, false, nil, matcherSets[0]...)
-	}
-
-	err = formatter(ss)
-	if err != nil {
-		return err
-	}
-
-	if ws := ss.Warnings(); len(ws) > 0 {
-		return tsdb_errors.NewMulti(ws.AsErrors()...).Err()
-	}
-
-	if ss.Err() != nil {
-		return ss.Err()
-	}
-	return nil
-}
-
 func formatSeriesSetToJSON(ss storage.SeriesSet) error {
 	getSeriesID := func(in []byte) uint64 {
 		hash := fnv.New64()
@@ -839,6 +794,10 @@ func formatSeriesSetToJSON(ss storage.SeriesSet) error {
 		b, err := json.Marshal(lbs)
 		if err != nil {
 			return err
+		}
+
+		if len(b) == 0 {
+			continue
 		}
 
 		id := getSeriesID(b)
