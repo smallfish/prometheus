@@ -594,7 +594,7 @@ Dump samples from a TSDB.
 
 ##### `promtool tsdb dump-series`
 
-Dump duplicate series (remove samples content) from a TSDB.
+Dump series (identified by a unique set of labels) from a TSDB into JSON format.
 
 
 

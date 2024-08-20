@@ -802,7 +802,7 @@ func formatSeriesSetToJSON(ss storage.SeriesSet) error {
 
 		id := getSeriesID(b)
 		if _, ok := seriesCache[id]; !ok {
-			fmt.Printf("%s\n", string(b))
+			fmt.Println(string(b))
 			seriesCache[id] = struct{}{}
 		}
 	}
